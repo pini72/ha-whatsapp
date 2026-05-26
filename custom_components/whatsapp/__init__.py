@@ -43,6 +43,8 @@ from .const import (
     DOMAIN,
     EVENT_MESSAGE_RECEIVED,
 )
+from homeassistant.helpers.service import SERVICE_DESCRIPTION_CACHE
+
 from .coordinator import WhatsAppDataUpdateCoordinator
 
 _LOGGER = getLogger(__name__)
@@ -131,6 +133,23 @@ def _register_contact_services(
             _make_handler(number),
             schema=contact_schema,
         )
+
+        descriptions_cache = hass.data.setdefault(SERVICE_DESCRIPTION_CACHE, {})
+        descriptions_cache[(DOMAIN, service_name)] = {
+            "name": f"Send to {name}",
+            "description": f"Send a WhatsApp message to {name}.",
+            "fields": {
+                "message": {
+                    "name": "Message",
+                    "description": "The text to send.",
+                    "required": True,
+                    "example": "Hello!",
+                    "selector": {"text": {}},
+                }
+            },
+            "target": False,
+        }
+
         registered.append(service_name)
         _LOGGER.debug(
             "Registered contact service whatsapp.%s → %s",
@@ -151,9 +170,11 @@ def _unregister_contact_services(hass: HomeAssistant, entry_id: str) -> None:
         if eid != entry_id:
             other_services.update(data.get("contact_services", []))
 
+    descriptions_cache: dict = hass.data.get(SERVICE_DESCRIPTION_CACHE, {})
     for service_name in my_services - other_services:
         if hass.services.has_service(DOMAIN, service_name):
             hass.services.async_remove(DOMAIN, service_name)
+            descriptions_cache.pop((DOMAIN, service_name), None)
             _LOGGER.debug("Unregistered contact service whatsapp.%s", service_name)
 
 
