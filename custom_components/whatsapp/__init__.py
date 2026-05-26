@@ -21,6 +21,7 @@ is responsible for:
 
 from __future__ import annotations
 
+import re
 from logging import getLogger
 from typing import Any
 
@@ -36,6 +37,7 @@ from .const import (
     CONF_API_KEY,
     CONF_MARK_AS_READ,
     CONF_POLLING_INTERVAL,
+    CONF_PREDEFINED_CONTACTS,
     CONF_SELF_MESSAGES,
     CONF_WHITELIST,
     DOMAIN,
@@ -73,6 +75,86 @@ _SERVICES = [
     "search_groups",
     "mark_as_read",
 ]
+
+
+def _parse_contacts(contacts_str: str) -> dict[str, str]:
+    """Parse 'Name: +number' lines into {name: number}."""
+    contacts: dict[str, str] = {}
+    for entry in contacts_str.split(","):
+        entry = entry.strip()
+        if not entry or ":" not in entry:
+            continue
+        name, _, number = entry.partition(":")
+        name = name.strip()
+        number = number.strip()
+        if name and number:
+            contacts[name] = number
+    return contacts
+
+
+def _contact_service_slug(name: str) -> str:
+    """Convert a contact display name to a valid HA service name slug."""
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    return f"send_to_{slug}"
+
+
+def _register_contact_services(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    client: WhatsAppApiClient,
+) -> list[str]:
+    """Register a dedicated send_to_<name> service for each predefined contact."""
+    contacts_str = entry.options.get(CONF_PREDEFINED_CONTACTS, "")
+    contacts = _parse_contacts(contacts_str)
+    registered: list[str] = []
+    contact_schema = vol.Schema({vol.Required("message"): cv.string})
+
+    for name, number in contacts.items():
+        service_name = _contact_service_slug(name)
+
+        if hass.services.has_service(DOMAIN, service_name):
+            _LOGGER.warning(
+                "Contact service whatsapp.%s already registered "
+                "(possibly from another account). Overwriting.",
+                service_name,
+            )
+
+        def _make_handler(target: str) -> Any:
+            async def _handler(call: ServiceCall) -> None:
+                await client.send_message(target, call.data["message"])
+
+            return _handler
+
+        hass.services.async_register(
+            DOMAIN,
+            service_name,
+            _make_handler(number),
+            schema=contact_schema,
+        )
+        registered.append(service_name)
+        _LOGGER.debug(
+            "Registered contact service whatsapp.%s → %s",
+            service_name,
+            client.mask(number),
+        )
+
+    return registered
+
+
+def _unregister_contact_services(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove all dynamic contact services that belong exclusively to this entry."""
+    my_services = set(
+        hass.data[DOMAIN].get(entry_id, {}).get("contact_services", [])
+    )
+    other_services: set[str] = set()
+    for eid, data in hass.data[DOMAIN].items():
+        if eid != entry_id:
+            other_services.update(data.get("contact_services", []))
+
+    for service_name in my_services - other_services:
+        if hass.services.has_service(DOMAIN, service_name):
+            hass.services.async_remove(DOMAIN, service_name)
+            _LOGGER.debug("Unregistered contact service whatsapp.%s", service_name)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -146,6 +228,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         "client": client,
         "coordinator": coordinator,
+        "contact_services": [],
     }
 
     await coordinator.async_config_entry_first_refresh()
@@ -232,6 +315,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register services globally
     await async_setup_services(hass)
+
+    # Register per-entry predefined contact services
+    hass.data[DOMAIN][entry.entry_id]["contact_services"] = (
+        _register_contact_services(hass, entry, client)
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -710,6 +798,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = hass.data[DOMAIN][entry.entry_id]
     client: WhatsAppApiClient = data["client"]
     await client.close()
+    _unregister_contact_services(hass, entry.entry_id)
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)

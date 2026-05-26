@@ -19,6 +19,7 @@ from .const import (
     CONF_API_KEY,
     CONF_MARK_AS_READ,
     CONF_POLLING_INTERVAL,
+    CONF_PREDEFINED_CONTACTS,
     CONF_RETRY_ATTEMPTS,
     CONF_SELF_MESSAGES,
     CONF_URL,
@@ -632,6 +633,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):  # type: ignore[misc]
                     CONF_SELF_MESSAGES,
                     default=self._config_entry.options.get(CONF_SELF_MESSAGES, False),
                 ): bool,
+                vol.Optional(
+                    CONF_PREDEFINED_CONTACTS,
+                    default=self._config_entry.options.get(CONF_PREDEFINED_CONTACTS, ""),
+                ): str,
                 vol.Optional("reset_session", default=False): bool,
             }
         )
@@ -713,6 +718,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):  # type: ignore[misc]
 
             # Always remove ephemeral reset_session option
             user_input.pop("reset_session", None)
+
             return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(

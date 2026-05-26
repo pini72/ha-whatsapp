@@ -25,6 +25,9 @@ Constants:
         new WhatsApp message is received.
     CONF_SELF_MESSAGES: Options-entry key that controls whether messages sent
         to the account's own number should be processed.
+    CONF_PREDEFINED_CONTACTS: Options-entry key for a list of named contacts
+        (one per line, ``Name: +number`` format). Each contact gets a
+        dedicated ``whatsapp.send_to_<name>`` service registered automatically.
 """
 
 DOMAIN = "whatsapp"
@@ -40,4 +43,5 @@ CONF_SESSION_ID = "session_id"
 CONF_MASK_SENSITIVE_DATA = "mask_sensitive_data"
 CONF_DEBUG_PAYLOADS = "debug_payloads"
 CONF_SELF_MESSAGES = "self_messages"
+CONF_PREDEFINED_CONTACTS = "predefined_contacts"
 EVENT_MESSAGE_RECEIVED = "whatsapp_message_received"
